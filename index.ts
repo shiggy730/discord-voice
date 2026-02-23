@@ -25,6 +25,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { writeFileSync, readFileSync, unlinkSync } from "fs";
 import { execSync } from "child_process";
+import { randomUUID } from "crypto";
+import { loadCoreAgentDeps, type CoreAgentDeps, type CoreConfig } from "./core-bridge.js";
 
 // Types for OpenClaw plugin API
 interface PluginApi {
@@ -66,6 +68,113 @@ let client: Client | null = null;
 let activeConnections: Map<string, VoiceConnection> = new Map();
 let api: PluginApi;
 let followedUsers: Set<string> = new Set();
+let coreDeps: CoreAgentDeps | null = null;
+
+// ============================================
+// Session-based Response Generation
+// ============================================
+
+async function generateSessionResponse(userMessage: string, userId: string): Promise<string | null> {
+  if (!coreDeps) {
+    try {
+      coreDeps = await loadCoreAgentDeps();
+    } catch (err) {
+      api.logger.error(`Failed to load core deps: ${err}`);
+      return null;
+    }
+  }
+
+  const cfg = api.config as CoreConfig;
+  const agentId = "main";
+
+  // Resolve paths
+  const storePath = coreDeps.resolveStorePath(cfg.session?.store, { agentId });
+  const agentDir = coreDeps.resolveAgentDir(cfg, agentId);
+  const workspaceDir = coreDeps.resolveAgentWorkspaceDir(cfg, agentId);
+
+  // Ensure workspace exists
+  await coreDeps.ensureAgentWorkspace({ dir: workspaceDir });
+
+  // Use voice-specific session key tied to Discord user
+  const sessionKey = `voice:discord:${userId}`;
+  const now = Date.now();
+
+  // Load or create session entry
+  const sessionStore = coreDeps.loadSessionStore(storePath);
+  let sessionEntry = sessionStore[sessionKey] as { sessionId: string; updatedAt: number } | undefined;
+
+  if (!sessionEntry) {
+    sessionEntry = {
+      sessionId: randomUUID(),
+      updatedAt: now,
+    };
+    sessionStore[sessionKey] = sessionEntry;
+    await coreDeps.saveSessionStore(storePath, sessionStore);
+  }
+
+  const sessionId = sessionEntry.sessionId;
+  const sessionFile = coreDeps.resolveSessionFilePath(sessionId, sessionEntry, { agentId });
+
+  // Resolve model from config (use configured default)
+  const modelRef = `${coreDeps.DEFAULT_PROVIDER}/${coreDeps.DEFAULT_MODEL}`;
+  const slashIndex = modelRef.indexOf("/");
+  const provider = slashIndex === -1 ? coreDeps.DEFAULT_PROVIDER : modelRef.slice(0, slashIndex);
+  const model = slashIndex === -1 ? modelRef : modelRef.slice(slashIndex + 1);
+
+  // Resolve thinking level
+  const thinkLevel = coreDeps.resolveThinkingDefault({ cfg, provider, model });
+
+  // Resolve agent identity
+  const identity = coreDeps.resolveAgentIdentity(cfg, agentId);
+  const agentName = identity?.name?.trim() || "assistant";
+
+  // Voice-specific system prompt
+  const extraSystemPrompt = `You are ${agentName} responding via voice in a Discord voice channel. Keep responses brief and conversational (1-3 sentences) since they'll be spoken aloud. Be natural and friendly. You have access to all your normal tools and memory.`;
+
+  // Resolve timeout
+  const timeoutMs = coreDeps.resolveAgentTimeoutMs({ cfg });
+  const runId = `voice:discord:${userId}:${Date.now()}`;
+
+  try {
+    api.logger.info(`Running agent for voice response...`);
+    const result = await coreDeps.runEmbeddedPiAgent({
+      sessionId,
+      sessionKey,
+      messageProvider: "discord-voice",
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: userMessage,
+      provider,
+      model,
+      thinkLevel,
+      verboseLevel: "off",
+      timeoutMs,
+      runId,
+      lane: "voice",
+      extraSystemPrompt,
+      agentDir,
+    });
+
+    // Extract text from payloads
+    const texts = (result.payloads ?? [])
+      .filter((p) => p.text && !p.isError)
+      .map((p) => p.text?.trim())
+      .filter(Boolean);
+
+    const text = texts.join(" ") || null;
+
+    if (!text && result.meta?.aborted) {
+      api.logger.warn("Response generation was aborted");
+      return null;
+    }
+
+    return text;
+  } catch (err) {
+    api.logger.error(`Session response failed: ${err}`);
+    return null;
+  }
+}
 
 // ============================================
 // Speech-to-Text (STT)
@@ -243,40 +352,25 @@ async function handleVoiceConnection(
         const text = await transcribeAudio(audioBuffer);
         if (!text.trim()) return;
 
-        api.logger.info(`[Voice] ${text}`);
+        api.logger.info(`[Voice] User said: "${text}"`);
 
         try {
-          // Use OpenAI API (we have the key from STT config)
-          const openaiKey = config?.stt?.openaiApiKey;
-          if (!openaiKey) {
-            api.logger.warn(`No OpenAI API key configured for voice responses`);
+          // 2. Generate response through main OpenClaw session
+          const replyText = await generateSessionResponse(text, userId);
+          
+          if (!replyText) {
+            api.logger.warn(`No response generated for voice input`);
             return;
           }
-          const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${openaiKey}`,
-            },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              max_tokens: 300,
-              messages: [
-                { role: "system", content: "You are Natsu, a helpful voice assistant. Keep responses brief and conversational since they'll be spoken aloud. Be warm and friendly." },
-                { role: "user", content: text }
-              ],
-            }),
-          });
-
-          const aiResult = await aiResponse.json() as any;
-          const replyText = aiResult?.choices?.[0]?.message?.content || "Sorry, I couldn't process that.";
           
-          // Generate TTS using edge-tts CLI
+          api.logger.info(`[Voice] Response: "${replyText}"`);
+          
+          // 3. Generate TTS using edge-tts CLI
           const ttsPath = join(tmpdir(), `tts-${Date.now()}.mp3`);
           const safeText = replyText.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/'/g, "'\\''");
           execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --text "${safeText}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
           
-          // Play audio response
+          // 4. Play audio response
           const resource = createAudioResource(ttsPath);
           player.play(resource);
         } catch (err: any) {

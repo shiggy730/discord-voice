@@ -122,5 +122,6 @@ Voice responses include a system prompt that encourages brief, conversational re
 
 ## TODO
 
+- [ ] Strip emoji from voice responses (TTS reads them as "backslash" etc.)
 - [ ] Optimize VAD to avoid cutting off speech
 - [ ] Add local Whisper support (whisper.cpp)

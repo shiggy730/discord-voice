@@ -122,7 +122,7 @@ openclaw gateway call discord-voice.status
 ## TODO
 
 - [x] Route voice through main OpenClaw session (for tool access + model agnostic)
-- [ ] Fix followUser/leaveWhenEmpty — bot stays in channel after user leaves
+- [ ] Fix followUser — auto-join when user joins, auto-leave when user leaves (both broken)
 - [ ] Optimize VAD to avoid cutting off speech
 - [ ] Add local Whisper support (whisper.cpp)
 

@@ -407,8 +407,32 @@ async function handleVoiceConnection(
 // Plugin Commands
 // ============================================
 
+async function resolveVoiceChannel(nameOrId: string): Promise<VoiceChannel | null> {
+  if (!client) return null;
+  
+  // Try direct ID fetch first
+  if (/^\d+$/.test(nameOrId)) {
+    try {
+      const channel = await client.channels.fetch(nameOrId);
+      if (channel?.type === 2) return channel as VoiceChannel;
+    } catch {}
+  }
+  
+  // Search by name across all guilds
+  const nameLower = nameOrId.toLowerCase();
+  for (const [, guild] of client.guilds.cache) {
+    const channels = await guild.channels.fetch();
+    for (const [, channel] of channels) {
+      if (channel?.type === 2 && channel.name.toLowerCase() === nameLower) {
+        return channel as VoiceChannel;
+      }
+    }
+  }
+  return null;
+}
+
 function registerCommands() {
-  // /voice join <channel-id>
+  // /voice join <channel-name-or-id>
   api.registerCommand({
     name: "voice",
     description: "Voice channel controls: join, leave, status",
@@ -417,36 +441,60 @@ function registerCommands() {
     handler: async (ctx) => {
       const args = ctx.args?.trim().split(/\s+/) || [];
       const action = args[0];
-      const channelId = args[1];
+      const channelArg = args.slice(1).join(" "); // Allow multi-word channel names
 
-      if (action === "join" && channelId) {
-        const channel = await client?.channels.fetch(channelId);
-        if (!channel || channel.type !== 2) { // 2 = VoiceChannel
-          return { text: "Invalid voice channel ID" };
+      if (action === "join" && channelArg) {
+        const channel = await resolveVoiceChannel(channelArg);
+        if (!channel) {
+          return { text: `❌ Voice channel not found: ${channelArg}` };
         }
-        await handleVoiceConnection(channel as VoiceChannel, channel.guildId);
+        await handleVoiceConnection(channel, channel.guildId);
         return { text: `🎙️ Joined voice channel: ${channel.name}` };
       }
 
-      if (action === "leave" && channelId) {
-        const conn = activeConnections.get(channelId);
-        if (conn) {
-          conn.destroy();
-          activeConnections.delete(channelId);
-          return { text: "👋 Left voice channel" };
+      if (action === "leave") {
+        if (channelArg) {
+          // Leave specific channel
+          const channel = await resolveVoiceChannel(channelArg);
+          if (channel) {
+            const conn = activeConnections.get(channel.id);
+            if (conn) {
+              conn.destroy();
+              activeConnections.delete(channel.id);
+              return { text: `👋 Left voice channel: ${channel.name}` };
+            }
+          }
+          return { text: `Not in channel: ${channelArg}` };
+        } else {
+          // Leave all channels
+          if (activeConnections.size === 0) {
+            return { text: "Not in any voice channels" };
+          }
+          for (const [id, conn] of activeConnections) {
+            conn.destroy();
+            activeConnections.delete(id);
+          }
+          return { text: "👋 Left all voice channels" };
         }
-        return { text: "Not in that channel" };
       }
 
       if (action === "status") {
-        const channels = Array.from(activeConnections.keys());
-        if (channels.length === 0) {
+        if (activeConnections.size === 0) {
           return { text: "Not in any voice channels" };
         }
-        return { text: `🎙️ Active in: ${channels.join(", ")}` };
+        const names: string[] = [];
+        for (const [id] of activeConnections) {
+          try {
+            const ch = await client?.channels.fetch(id);
+            names.push(ch?.type === 2 ? (ch as VoiceChannel).name : id);
+          } catch {
+            names.push(id);
+          }
+        }
+        return { text: `🎙️ Active in: ${names.join(", ")}` };
       }
 
-      return { text: "Usage: /voice join|leave|status [channel-id]" };
+      return { text: "Usage: /voice join|leave|status [channel-name-or-id]" };
     },
   });
 }

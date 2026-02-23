@@ -122,6 +122,7 @@ openclaw gateway call discord-voice.status
 ## TODO
 
 - [ ] Route voice through main OpenClaw session (for tool access)
+- [ ] Fix followUser/leaveWhenEmpty — bot stays in channel after user leaves
 - [ ] Support Claude API for responses
 - [ ] Add conversation memory/context
 - [ ] Optimize VAD to avoid cutting off speech

@@ -25,7 +25,7 @@
    pip install edge-tts
    ```
 
-4. **OpenAI API key** - For Whisper STT and GPT responses
+4. **OpenAI API key** - For Whisper STT
 
 ## Install the plugin
 
@@ -58,13 +58,7 @@ Add to `~/.openclaw/openclaw.json`:
             "openaiApiKey": "sk-..."
           },
           "vad": {
-            "enabled": true,
             "silenceThresholdMs": 1500
-          },
-          "followUser": {
-            "enabled": true,
-            "followOwner": true,
-            "leaveWhenEmpty": true
           }
         }
       }
@@ -86,18 +80,13 @@ Bot intents (Discord Developer Portal):
 
 ## Usage
 
-### Join a voice channel
+### Via chat
+Just ask the agent to join or leave voice — it will use the gateway RPC.
+
+### Via gateway RPC
 ```bash
 openclaw gateway call discord-voice.join --params '{"channelId":"CHANNEL_ID"}'
-```
-
-### Leave a voice channel
-```bash
 openclaw gateway call discord-voice.leave --params '{"channelId":"CHANNEL_ID"}'
-```
-
-### Check status
-```bash
 openclaw gateway call discord-voice.status
 ```
 
@@ -115,7 +104,7 @@ openclaw gateway call discord-voice.status
 3. Decodes Opus to PCM using @discordjs/opus
 4. VAD detects end of speech (silence threshold)
 5. PCM audio is wrapped in WAV and sent to Whisper API
-6. Transcribed text is sent to GPT-4o-mini for response
+6. Transcribed text is routed through main OpenClaw session
 7. Response is converted to speech via Edge TTS
 8. Audio is played back in the voice channel
 

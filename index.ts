@@ -67,7 +67,6 @@ interface Command {
 let client: Client | null = null;
 let activeConnections: Map<string, VoiceConnection> = new Map();
 let api: PluginApi;
-let followedUsers: Set<string> = new Set();
 let coreDeps: CoreAgentDeps | null = null;
 
 // ============================================
@@ -405,83 +404,6 @@ async function handleVoiceConnection(
 }
 
 // ============================================
-// Follow-the-User (Auto-join when user joins voice)
-// ============================================
-
-function setupFollowUser() {
-  if (!client) return;
-
-  client.on("voiceStateUpdate", async (oldState, newState) => {
-    const config = api.config.plugins?.entries?.["discord-voice"]?.config;
-
-    // Check if follow mode is enabled
-    if (!config?.followUser?.enabled) return;
-
-    const userId = newState.member?.id;
-    if (!userId) return;
-
-    // Check if this user should be followed
-    const followIds = config.followUser?.userIds || [];
-    const followOwner = config.followUser?.followOwner !== false;
-    const ownerIds = api.config.owner || [];
-
-    const shouldFollow =
-      followIds.includes(userId) ||
-      (followOwner && ownerIds.includes(userId));
-
-    if (!shouldFollow) return;
-
-    // User joined a voice channel
-    if (newState.channel && newState.channel.type === 2) {
-      const channelId = newState.channel.id;
-
-      // Don't rejoin if already in this channel
-      if (activeConnections.has(channelId)) return;
-
-      api.logger.info(`Following ${userId} to voice channel: ${newState.channel.name}`);
-
-      try {
-        await handleVoiceConnection(
-          newState.channel as VoiceChannel,
-          newState.guild.id
-        );
-        followedUsers.add(userId);
-      } catch (err) {
-        api.logger.error(`Failed to follow user to voice: ${err}`);
-      }
-    }
-
-    // User left voice channel - optionally leave too
-    if (oldState.channel && !newState.channel && followedUsers.has(userId)) {
-      const channelId = oldState.channel.id;
-
-      if (config.followUser?.leaveWhenEmpty !== false) {
-        // Check if any followed users are still in the channel
-        const channel = oldState.channel as VoiceChannel;
-        const followedStillPresent = channel.members.some(member => {
-          const memberId = member.id;
-          return followIds.includes(memberId) ||
-                 (followOwner && ownerIds.includes(memberId));
-        });
-
-        if (!followedStillPresent) {
-          api.logger.info(`User left, leaving voice channel: ${oldState.channel.name}`);
-          const conn = activeConnections.get(channelId);
-          if (conn) {
-            conn.destroy();
-            activeConnections.delete(channelId);
-          }
-        }
-      }
-
-      followedUsers.delete(userId);
-    }
-  });
-
-  api.logger.info("Follow-user mode initialized");
-}
-
-// ============================================
 // Plugin Commands
 // ============================================
 
@@ -594,9 +516,6 @@ export default function register(pluginApi: PluginApi) {
 
       await client.login(token);
       api.logger.info("Discord voice plugin started");
-
-      // Setup follow-user mode
-      setupFollowUser();
 
       // Auto-join configured channels
       if (config?.autoJoin?.enabled && config?.autoJoin?.channelIds) {

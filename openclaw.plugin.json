@@ -31,10 +31,6 @@
       "vad": {
         "type": "object",
         "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
           "silenceThresholdMs": {
             "type": "number",
             "default": 1500,
@@ -53,31 +49,6 @@
             "type": "array",
             "items": { "type": "string" },
             "description": "Voice channel IDs to auto-join on startup"
-          }
-        }
-      },
-      "followUser": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "Auto-join voice when followed users join"
-          },
-          "followOwner": {
-            "type": "boolean",
-            "default": true,
-            "description": "Automatically follow users in config.owner"
-          },
-          "userIds": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Additional Discord user IDs to follow"
-          },
-          "leaveWhenEmpty": {
-            "type": "boolean",
-            "default": true,
-            "description": "Leave channel when all followed users leave"
           }
         }
       }

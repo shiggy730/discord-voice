@@ -23,7 +23,7 @@ import { OpusEncoder } from "@discordjs/opus";
 import { Readable } from "stream";
 import { tmpdir } from "os";
 import { join } from "path";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { randomUUID } from "crypto";
 import { loadCoreAgentDeps, type CoreAgentDeps, type CoreConfig } from "./core-bridge.js";
@@ -61,6 +61,13 @@ interface Command {
   acceptsArgs?: boolean;
   requireAuth?: boolean;
   handler: (ctx: any) => Promise<{ text: string }> | { text: string };
+}
+
+// Debug logging
+const DEBUG_LOG = "/tmp/voice-debug.log";
+function debugLog(msg: string) {
+  const ts = new Date().toISOString();
+  appendFileSync(DEBUG_LOG, `${ts} ${msg}\n`);
 }
 
 // Plugin state
@@ -302,6 +309,7 @@ class VoiceActivityDetector {
       }
     } else if (this.speaking && this.pcmChunks.length > 0) {
       // Stream ended - process accumulated PCM audio immediately
+      debugLog(`VAD: Stream ended with ${this.pcmChunks.length} PCM chunks, triggering callback`);
       const fullAudio = Buffer.concat(this.pcmChunks);
       this.pcmChunks = [];
       this.speaking = false;
@@ -332,6 +340,12 @@ async function handleVoiceConnection(
   // Wait for connection to be ready
   await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
   api.logger.info(`Joined voice channel: ${channel.name}`);
+  console.log(`[discord-voice] ✅ Joined voice channel: ${channel.name}`);
+
+  // Log connection state changes
+  connection.on("stateChange", (oldState, newState) => {
+    console.log(`[discord-voice] Connection state: ${oldState.status} -> ${newState.status}`);
+  });
 
   try {
     const receiver = connection.receiver;
@@ -339,30 +353,46 @@ async function handleVoiceConnection(
     connection.subscribe(player);
 
     api.logger.info(`Voice receiver ready, listening for audio...`);
+    console.log(`[discord-voice] 🎤 Voice receiver ready, listening for audio...`);
 
   // Listen to each user's audio
   receiver.speaking.on("start", (userId) => {
+    debugLog(`User ${userId} started speaking`);
+    console.log(`[discord-voice] 🎙️ User ${userId} started speaking`);
     api.logger.info(`[DEBUG] User ${userId} started speaking`);
     const config = api.config.plugins?.entries?.["discord-voice"]?.config;
     const silenceMs = config?.vad?.silenceThresholdMs || 1500;
 
     const vad = new VoiceActivityDetector(silenceMs, async (audioBuffer) => {
+      debugLog(`VAD callback fired! Audio buffer size: ${audioBuffer.length} bytes`);
       try {
         // 1. Transcribe speech
+        debugLog(`Starting transcription...`);
         const text = await transcribeAudio(audioBuffer);
-        if (!text.trim()) return;
+        if (!text.trim()) {
+          debugLog(`Transcription empty, skipping`);
+          return;
+        }
 
+        debugLog(`Transcribed: "${text}"`);
+        console.log(`[discord-voice] 📝 Transcribed: "${text}"`);
         api.logger.info(`[Voice] User said: "${text}"`);
 
         try {
           // 2. Generate response through main OpenClaw session
+          debugLog(`Generating response via session...`);
+          console.log(`[discord-voice] 🤖 Generating response via session...`);
           const replyText = await generateSessionResponse(text, userId);
           
           if (!replyText) {
+            debugLog(`No response generated`);
+            console.log(`[discord-voice] ⚠️ No response generated`);
             api.logger.warn(`No response generated for voice input`);
             return;
           }
           
+          debugLog(`Response: "${replyText}"`);
+          console.log(`[discord-voice] 💬 Response: "${replyText}"`);
           api.logger.info(`[Voice] Response: "${replyText}"`);
           
           // 3. Generate TTS using edge-tts CLI
@@ -400,9 +430,22 @@ async function handleVoiceConnection(
     });
 
     audioStream.on("end", () => {
+      debugLog(`Audio stream ended for user ${userId}, total chunks: ${chunkCount}`);
+      console.log(`[discord-voice] 🔇 Audio stream ended for user ${userId}, total chunks: ${chunkCount}`);
       api.logger.info(`[DEBUG] Audio stream ended for user ${userId}, total chunks: ${chunkCount}`);
       vad.processAudio(Buffer.alloc(0), false);
     });
+
+    audioStream.on("error", (err) => {
+      debugLog(`Audio stream error for ${userId}: ${err}`);
+      console.error(`[discord-voice] ❌ Audio stream error for ${userId}:`, err);
+    });
+  });
+
+  // Also listen for when speaking stops
+  receiver.speaking.on("end", (userId) => {
+    debugLog(`User ${userId} stopped speaking (speaking.end event)`);
+    console.log(`[discord-voice] 🔇 User ${userId} stopped speaking`);
   });
 
   } catch (err) {

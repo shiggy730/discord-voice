@@ -121,7 +121,18 @@ openclaw gateway call discord-voice.status
 
 ## TODO
 
-- [ ] Route voice through main OpenClaw session (for tool access + model agnostic)
+- [x] Route voice through main OpenClaw session (for tool access + model agnostic)
 - [ ] Fix followUser/leaveWhenEmpty — bot stays in channel after user leaves
 - [ ] Optimize VAD to avoid cutting off speech
 - [ ] Add local Whisper support (whisper.cpp)
+
+## Session Integration
+
+Voice messages are now routed through the main OpenClaw agent infrastructure via `runEmbeddedPiAgent`. This means:
+
+- **Uses your configured model** (Claude Opus, GPT-4, etc.)
+- **Full tool access** — can search web, read files, check calendar, etc.
+- **Session memory** — voice conversations are logged to session context
+- **Voice-specific session** — each Discord user gets their own session (`voice:discord:<userId>`)
+
+Voice responses include a system prompt that encourages brief, conversational replies suitable for spoken output.

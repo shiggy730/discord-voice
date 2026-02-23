@@ -1,0 +1,90 @@
+{
+  "id": "discord-voice",
+  "name": "Discord Voice",
+  "version": "0.1.0",
+  "description": "Voice channel support for Discord",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "botToken": {
+        "type": "string",
+        "description": "Discord bot token (uses main Discord token if not set)"
+      },
+      "stt": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "local-whisper", "deepgram"],
+            "default": "openai"
+          },
+          "openaiApiKey": {
+            "type": "string",
+            "description": "OpenAI API key for Whisper (falls back to env)"
+          },
+          "model": {
+            "type": "string",
+            "default": "whisper-1"
+          }
+        }
+      },
+      "vad": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "silenceThresholdMs": {
+            "type": "number",
+            "default": 1500,
+            "description": "Silence duration before processing speech"
+          }
+        }
+      },
+      "autoJoin": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "channelIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Voice channel IDs to auto-join on startup"
+          }
+        }
+      },
+      "followUser": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Auto-join voice when followed users join"
+          },
+          "followOwner": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically follow users in config.owner"
+          },
+          "userIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Additional Discord user IDs to follow"
+          },
+          "leaveWhenEmpty": {
+            "type": "boolean",
+            "default": true,
+            "description": "Leave channel when all followed users leave"
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "botToken": { "label": "Bot Token", "sensitive": true },
+    "stt.openaiApiKey": { "label": "OpenAI API Key", "sensitive": true }
+  }
+}

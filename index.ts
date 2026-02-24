@@ -26,7 +26,7 @@ import { OpusEncoder } from "@discordjs/opus";
 import { Readable } from "stream";
 import { tmpdir } from "os";
 import { join } from "path";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { randomUUID } from "crypto";
 import { loadCoreAgentDeps, type CoreAgentDeps, type CoreConfig } from "./core-bridge.js";
@@ -117,14 +117,27 @@ async function generateSessionResponse(userMessage: string, userId: string): Pro
   const sessionId = sessionEntry.sessionId;
   const sessionFile = coreDeps.resolveSessionFilePath(sessionId, sessionEntry, { agentId });
 
-  // Resolve model from config (use configured default)
-  const modelRef = `${coreDeps.DEFAULT_PROVIDER}/${coreDeps.DEFAULT_MODEL}`;
+  // Resolve model from plugin config, or fall back to default
+  const pluginConfig = (cfg as any).plugins?.entries?.["discord-voice"]?.config;
+  const configuredModel = pluginConfig?.model as string | undefined;
+  
+  // Map short names to full model refs
+  const modelAliases: Record<string, string> = {
+    "opus": "anthropic/claude-opus-4-5",
+    "sonnet": "anthropic/claude-sonnet-4-20250514",
+    "haiku": "anthropic/claude-haiku-3-5-20241022",
+  };
+  
+  const modelRef = configuredModel 
+    ? (modelAliases[configuredModel.toLowerCase()] || configuredModel)
+    : `${coreDeps.DEFAULT_PROVIDER}/${coreDeps.DEFAULT_MODEL}`;
   const slashIndex = modelRef.indexOf("/");
   const provider = slashIndex === -1 ? coreDeps.DEFAULT_PROVIDER : modelRef.slice(0, slashIndex);
   const model = slashIndex === -1 ? modelRef : modelRef.slice(slashIndex + 1);
 
-  // Resolve thinking level
-  const thinkLevel = coreDeps.resolveThinkingDefault({ cfg, provider, model });
+  // Resolve thinking level - default to "off" for voice (speed matters)
+  const configuredThinking = pluginConfig?.thinking as string | undefined;
+  const thinkLevel = configuredThinking || "off";
 
   // Resolve agent identity
   const identity = coreDeps.resolveAgentIdentity(cfg, agentId);
@@ -361,22 +374,28 @@ async function handleVoiceConnection(
 
     const vad = new VoiceActivityDetector(silenceMs, async (audioBuffer) => {
       try {
+        const pipelineStart = Date.now();
+        
         // 1. Transcribe speech
+        const sttStart = Date.now();
         const text = await transcribeAudio(audioBuffer);
+        const sttTime = Date.now() - sttStart;
         if (!text.trim()) return;
 
-        api.logger.info(`[Voice] User said: "${text}"`);
+        api.logger.info(`[Voice] STT took ${sttTime}ms - User said: "${text}"`);
 
         try {
           // 2. Generate response through main OpenClaw session
+          const llmStart = Date.now();
           const replyText = await generateSessionResponse(text, userId);
+          const llmTime = Date.now() - llmStart;
           
           if (!replyText) {
             api.logger.warn(`No response generated for voice input`);
             return;
           }
           
-          api.logger.info(`[Voice] Response: "${replyText}"`);
+          api.logger.info(`[Voice] LLM took ${llmTime}ms - Response: "${replyText.slice(0, 100)}..."`);
           
           // 3. Strip emoji from response (TTS reads them as garbage)
           // Comprehensive emoji regex covering all common ranges
@@ -406,10 +425,13 @@ async function handleVoiceConnection(
           
           // 4. Generate TTS using edge-tts CLI
           // Write text to file to avoid shell escaping issues
+          const ttsStart = Date.now();
           const ttsPath = join(tmpdir(), `tts-${Date.now()}.mp3`);
           const textPath = join(tmpdir(), `tts-text-${Date.now()}.txt`);
           writeFileSync(textPath, textWithoutEmoji);
           execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --file "${textPath}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
+          const ttsTime = Date.now() - ttsStart;
+          api.logger.info(`[Voice] TTS took ${ttsTime}ms`);
           try { unlinkSync(textPath); } catch {}
           
           // 5. Pre-buffer audio file into memory to reduce disk I/O stuttering
@@ -423,6 +445,12 @@ async function handleVoiceConnection(
           });
           resource.volume?.setVolume(1.0);  // Ensure volume is set
           player.play(resource);
+          
+          const totalTime = Date.now() - pipelineStart;
+          const timingLog = `[${new Date().toISOString()}] TOTAL: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms) - "${text.slice(0,30)}..." -> "${textWithoutEmoji.slice(0,30)}..."\n`;
+          api.logger.info(`[Voice] TOTAL pipeline: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms)`);
+          // Also write to file for easy access
+          appendFileSync('/tmp/voice-timing.log', timingLog);
           
           // Clean up temp file after playback starts
           setTimeout(() => {

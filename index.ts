@@ -370,16 +370,20 @@ async function handleVoiceConnection(
           
           api.logger.info(`[Voice] Response: "${replyText}"`);
           
-          // 3. Generate TTS using edge-tts CLI
+          // 3. Strip emoji from response (TTS reads them as garbage)
+          const emojiRegex = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F02F}]|[\u{1F0A0}-\u{1F0FF}]|[\u{1F100}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F910}-\u{1F96B}]|[\u{1F980}-\u{1F9E0}]|[\u{200D}]|[\u{FE0F}]/gu;
+          const textWithoutEmoji = replyText.replace(emojiRegex, '').replace(/\s{2,}/g, ' ').trim();
+          
+          // 4. Generate TTS using edge-tts CLI
           const ttsPath = join(tmpdir(), `tts-${Date.now()}.mp3`);
-          const safeText = replyText.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/'/g, "'\\''");
+          const safeText = textWithoutEmoji.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/'/g, "'\\''");
           execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --text "${safeText}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
           
-          // 4. Pre-buffer audio file into memory to reduce disk I/O stuttering
+          // 5. Pre-buffer audio file into memory to reduce disk I/O stuttering
           const audioBuffer = readFileSync(ttsPath);
           const audioStream = Readable.from(audioBuffer);
           
-          // 5. Play audio response with buffering settings
+          // 6. Play audio response with buffering settings
           const resource = createAudioResource(audioStream, {
             inputType: StreamType.Arbitrary,
             inlineVolume: true,

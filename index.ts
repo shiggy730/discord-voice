@@ -27,7 +27,7 @@ import { Readable } from "stream";
 import { tmpdir } from "os";
 import { join } from "path";
 import { writeFileSync, readFileSync, unlinkSync, appendFileSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { randomUUID } from "crypto";
 import { loadCoreAgentDeps, type CoreAgentDeps, type CoreConfig } from "./core-bridge.js";
 
@@ -423,39 +423,46 @@ async function handleVoiceConnection(
             textWithoutEmoji = "I hear you!";
           }
           
-          // 4. Generate TTS using edge-tts CLI
-          // Write text to file to avoid shell escaping issues
+          // 4. Generate TTS using edge-tts with streaming
+          // Write text to temp file for edge-tts input
           const ttsStart = Date.now();
-          const ttsPath = join(tmpdir(), `tts-${Date.now()}.mp3`);
           const textPath = join(tmpdir(), `tts-text-${Date.now()}.txt`);
           writeFileSync(textPath, textWithoutEmoji);
-          execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --file "${textPath}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
-          const ttsTime = Date.now() - ttsStart;
-          api.logger.info(`[Voice] TTS took ${ttsTime}ms`);
-          try { unlinkSync(textPath); } catch {}
           
-          // 5. Pre-buffer audio file into memory to reduce disk I/O stuttering
-          const audioBuffer = readFileSync(ttsPath);
-          const audioStream = Readable.from(audioBuffer);
+          // Spawn edge-tts and stream stdout directly to Discord
+          const ttsProcess = spawn('/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts', [
+            '--voice', 'en-GB-SoniaNeural',
+            '--file', textPath
+          ]);
           
-          // 6. Play audio response with buffering settings
-          const resource = createAudioResource(audioStream, {
+          // Track time to first byte for logging
+          let firstByteTime: number | null = null;
+          ttsProcess.stdout.once('data', () => {
+            firstByteTime = Date.now() - ttsStart;
+            api.logger.info(`[Voice] TTS first byte: ${firstByteTime}ms`);
+          });
+          
+          // Create audio resource from streaming stdout
+          const resource = createAudioResource(ttsProcess.stdout, {
             inputType: StreamType.Arbitrary,
             inlineVolume: true,
           });
-          resource.volume?.setVolume(1.0);  // Ensure volume is set
+          resource.volume?.setVolume(1.0);
           player.play(resource);
           
-          const totalTime = Date.now() - pipelineStart;
-          const timingLog = `[${new Date().toISOString()}] TOTAL: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms) - "${text.slice(0,30)}..." -> "${textWithoutEmoji.slice(0,30)}..."\n`;
-          api.logger.info(`[Voice] TOTAL pipeline: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms)`);
-          // Also write to file for easy access
-          appendFileSync('/tmp/voice-timing.log', timingLog);
+          // Log when TTS process completes
+          ttsProcess.on('close', () => {
+            const ttsTime = Date.now() - ttsStart;
+            const totalTime = Date.now() - pipelineStart;
+            const timingLog = `[${new Date().toISOString()}] TOTAL: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms, firstByte: ${firstByteTime}ms) - "${text.slice(0,30)}..." -> "${textWithoutEmoji.slice(0,30)}..."\n`;
+            api.logger.info(`[Voice] TOTAL pipeline: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms, firstByte: ${firstByteTime}ms)`);
+            appendFileSync('/tmp/voice-timing.log', timingLog);
+            try { unlinkSync(textPath); } catch {}
+          });
           
-          // Clean up temp file after playback starts
-          setTimeout(() => {
-            try { unlinkSync(ttsPath); } catch {}
-          }, 5000);
+          ttsProcess.on('error', (err) => {
+            api.logger.error(`TTS process error: ${err}`);
+          });
         } catch (err: any) {
           api.logger.error(`Voice response error: ${err}`);
         }

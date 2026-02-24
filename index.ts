@@ -131,7 +131,7 @@ async function generateSessionResponse(userMessage: string, userId: string): Pro
   const agentName = identity?.name?.trim() || "assistant";
 
   // Voice-specific system prompt
-  const extraSystemPrompt = `You are ${agentName} responding via voice in a Discord voice channel. Keep responses brief and conversational (1-3 sentences) since they'll be spoken aloud. Be natural and friendly. You have access to all your normal tools and memory.`;
+  const extraSystemPrompt = `You are ${agentName} responding via voice in a Discord voice channel. Keep responses brief and conversational (1-3 sentences) since they'll be spoken aloud. Be natural and friendly. IMPORTANT: Do NOT use emoji in voice responses - they sound like garbage when spoken by TTS. You have access to all your normal tools and memory.`;
 
   // Resolve timeout
   const timeoutMs = coreDeps.resolveAgentTimeoutMs({ cfg });

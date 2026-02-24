@@ -18,6 +18,9 @@ import {
   entersState,
   VoiceConnection,
   getVoiceConnection,
+  StreamType,
+  AudioPlayerStatus,
+  NoSubscriberBehavior,
 } from "@discordjs/voice";
 import { OpusEncoder } from "@discordjs/opus";
 import { Readable } from "stream";
@@ -334,7 +337,12 @@ async function handleVoiceConnection(
 
   try {
     const receiver = connection.receiver;
-    const player = createAudioPlayer();
+    const player = createAudioPlayer({
+      behaviors: {
+        noSubscriber: NoSubscriberBehavior.Play,  // Keep playing even if connection hiccups
+        maxMissedFrames: 50,  // Allow more missed frames before stopping (default is 5)
+      },
+    });
     connection.subscribe(player);
 
   // Listen to each user's audio
@@ -367,9 +375,22 @@ async function handleVoiceConnection(
           const safeText = replyText.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/'/g, "'\\''");
           execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --text "${safeText}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
           
-          // 4. Play audio response
-          const resource = createAudioResource(ttsPath);
+          // 4. Pre-buffer audio file into memory to reduce disk I/O stuttering
+          const audioBuffer = readFileSync(ttsPath);
+          const audioStream = Readable.from(audioBuffer);
+          
+          // 5. Play audio response with buffering settings
+          const resource = createAudioResource(audioStream, {
+            inputType: StreamType.Arbitrary,
+            inlineVolume: true,
+          });
+          resource.volume?.setVolume(1.0);  // Ensure volume is set
           player.play(resource);
+          
+          // Clean up temp file after playback starts
+          setTimeout(() => {
+            try { unlinkSync(ttsPath); } catch {}
+          }, 5000);
         } catch (err: any) {
           api.logger.error(`Voice response error: ${err}`);
         }

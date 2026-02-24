@@ -453,9 +453,10 @@ async function resolveVoiceChannel(nameOrId: string): Promise<VoiceChannel | nul
 }
 
 function registerCommands() {
-  // /voice join <channel-name-or-id>
+  api.logger.info("[discord-voice] Registering /vc command...");
+  // /vc join <channel-name-or-id>
   api.registerCommand({
-    name: "voice",
+    name: "vc",
     description: "Voice channel controls: join, leave, status",
     acceptsArgs: true,
     requireAuth: true,
@@ -515,9 +516,10 @@ function registerCommands() {
         return { text: `🎙️ Active in: ${names.join(", ")}` };
       }
 
-      return { text: "Usage: /voice join|leave|status [channel-name-or-id]" };
+      return { text: "Usage: /vc join|leave|status [channel-name-or-id]" };
     },
   });
+  api.logger.info("[discord-voice] /vc command registered successfully");
 }
 
 // ============================================

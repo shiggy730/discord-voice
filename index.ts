@@ -131,7 +131,15 @@ async function generateSessionResponse(userMessage: string, userId: string): Pro
   const agentName = identity?.name?.trim() || "assistant";
 
   // Voice-specific system prompt
-  const extraSystemPrompt = `You are ${agentName} responding via voice in a Discord voice channel. Keep responses brief and conversational (1-3 sentences) since they'll be spoken aloud. Be natural and friendly. IMPORTANT: Do NOT use emoji in voice responses - they sound like garbage when spoken by TTS. You have access to all your normal tools and memory.`;
+  const extraSystemPrompt = `You are ${agentName} responding via voice in a Discord voice channel. Keep responses brief and conversational (1-3 sentences) since they'll be spoken aloud. Be natural and friendly.
+
+CRITICAL VOICE RULES:
+1. NEVER use emoji characters - they get read aloud as garbage text
+2. NEVER use emoji shortcodes like :smile: or :martial_arts_uniform:
+3. NEVER reference your emoji or identity marker in voice responses
+4. Just speak naturally as a friendly assistant
+
+You have access to all your normal tools and memory.`;
 
   // Resolve timeout
   const timeoutMs = coreDeps.resolveAgentTimeoutMs({ cfg });
@@ -371,13 +379,48 @@ async function handleVoiceConnection(
           api.logger.info(`[Voice] Response: "${replyText}"`);
           
           // 3. Strip emoji from response (TTS reads them as garbage)
-          const emojiRegex = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F02F}]|[\u{1F0A0}-\u{1F0FF}]|[\u{1F100}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F910}-\u{1F96B}]|[\u{1F980}-\u{1F9E0}]|[\u{200D}]|[\u{FE0F}]/gu;
-          const textWithoutEmoji = replyText.replace(emojiRegex, '').replace(/\s{2,}/g, ' ').trim();
+          // Comprehensive emoji regex covering all common ranges
+          const emojiRegex = /[\u{1F300}-\u{1FAFF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F0FF}]|[\u{1F100}-\u{1F1FF}]|[\u{200D}]|[\u{FE0F}]|[\u{FE0E}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{231A}-\u{231B}]|[\u{25AA}-\u{25AB}]|[\u{25B6}]|[\u{25C0}]|[\u{25FB}-\u{25FE}]|[\u{2614}-\u{2615}]|[\u{2648}-\u{2653}]|[\u{267F}]|[\u{2693}]|[\u{26A1}]|[\u{26AA}-\u{26AB}]|[\u{26BD}-\u{26BE}]|[\u{26C4}-\u{26C5}]|[\u{26CE}]|[\u{26D4}]|[\u{26EA}]|[\u{26F2}-\u{26F3}]|[\u{26F5}]|[\u{26FA}]|[\u{26FD}]|[\u{2702}]|[\u{2705}]|[\u{2708}-\u{270D}]|[\u{270F}]|[\u{2712}]|[\u{2714}]|[\u{2716}]|[\u{271D}]|[\u{2721}]|[\u{2728}]|[\u{2733}-\u{2734}]|[\u{2744}]|[\u{2747}]|[\u{274C}]|[\u{274E}]|[\u{2753}-\u{2755}]|[\u{2757}]|[\u{2763}-\u{2764}]|[\u{2795}-\u{2797}]|[\u{27A1}]|[\u{27B0}]|[\u{27BF}]|[\u{2934}-\u{2935}]|[\u{2B05}-\u{2B07}]|[\u{2B1B}-\u{2B1C}]|[\u{3030}]|[\u{303D}]|[\u{3297}]|[\u{3299}]/gu;
+          // Also strip Discord-style shortcodes like :emoji_name:
+          const shortcodeRegex = /:[a-z0-9_+-]+:/gi;
+          // Strip backslash escapes that might appear
+          const escapeRegex = /\\u\{?[0-9A-Fa-f]+\}?/g;
+          // Strip markdown formatting
+          const markdownRegex = /\*\*|__|\*|_|~~|`{1,3}|#{1,6}\s|>\s|\[\[|\]\]|\[|\]|\(|\)/g;
+          // Strip backslash-n and other escape sequences
+          const escapeSeqRegex = /\\[nrt"'\\]/g;
+          
+          let textWithoutEmoji = replyText
+            .replace(emojiRegex, '')
+            .replace(shortcodeRegex, '')
+            .replace(escapeRegex, '')
+            .replace(markdownRegex, '')
+            .replace(escapeSeqRegex, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+          
+          // Debug: log hex codes of any remaining non-ASCII
+          const hexDebug = [...textWithoutEmoji].map(c => c.charCodeAt(0) > 127 ? `\\u${c.charCodeAt(0).toString(16)}` : c).join('');
+          api.logger.info(`[Voice] After emoji strip: "${textWithoutEmoji}"`);
+          api.logger.info(`[Voice] Hex debug: "${hexDebug}"`);
+          
+          // Debug: write to temp file for inspection
+          const debugPath = join(tmpdir(), 'voice-debug.txt');
+          writeFileSync(debugPath, `Original: ${replyText}\n\nStripped: ${textWithoutEmoji}\n\nHex: ${hexDebug}\n`);
+          api.logger.info(`[Voice] Debug written to: ${debugPath}`);
+          
+          // If still empty after stripping, use a default
+          if (!textWithoutEmoji) {
+            textWithoutEmoji = "I hear you!";
+          }
           
           // 4. Generate TTS using edge-tts CLI
+          // Write text to file to avoid shell escaping issues
           const ttsPath = join(tmpdir(), `tts-${Date.now()}.mp3`);
-          const safeText = textWithoutEmoji.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/'/g, "'\\''");
-          execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --text "${safeText}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
+          const textPath = join(tmpdir(), `tts-text-${Date.now()}.txt`);
+          writeFileSync(textPath, textWithoutEmoji);
+          execSync(`/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts --voice "en-GB-SoniaNeural" --file "${textPath}" --write-media "${ttsPath}"`, { stdio: 'pipe' });
+          try { unlinkSync(textPath); } catch {}
           
           // 5. Pre-buffer audio file into memory to reduce disk I/O stuttering
           const audioBuffer = readFileSync(ttsPath);

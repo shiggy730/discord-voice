@@ -399,16 +399,6 @@ async function handleVoiceConnection(
             .replace(/\s{2,}/g, ' ')
             .trim();
           
-          // Debug: log hex codes of any remaining non-ASCII
-          const hexDebug = [...textWithoutEmoji].map(c => c.charCodeAt(0) > 127 ? `\\u${c.charCodeAt(0).toString(16)}` : c).join('');
-          api.logger.info(`[Voice] After emoji strip: "${textWithoutEmoji}"`);
-          api.logger.info(`[Voice] Hex debug: "${hexDebug}"`);
-          
-          // Debug: write to temp file for inspection
-          const debugPath = join(tmpdir(), 'voice-debug.txt');
-          writeFileSync(debugPath, `Original: ${replyText}\n\nStripped: ${textWithoutEmoji}\n\nHex: ${hexDebug}\n`);
-          api.logger.info(`[Voice] Debug written to: ${debugPath}`);
-          
           // If still empty after stripping, use a default
           if (!textWithoutEmoji) {
             textWithoutEmoji = "I hear you!";

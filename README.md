@@ -43,6 +43,27 @@ A plugin that adds voice channel support to OpenClaw's Discord integration.
 - Edge TTS CLI (via Python: `pip install edge-tts`)
 - DAVE protocol support (@snazzah/davey) for encrypted voice channels
 
+## Discord Bot Setup
+
+When inviting your Discord bot, make sure to include **both** OAuth2 scopes:
+
+- `bot` — Required for basic bot functionality
+- `applications.commands` — **Required for `/vc` slash command to work**
+
+Your invite URL should include both scopes:
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_BOT_ID&permissions=3148800&scope=bot%20applications.commands
+```
+
+The `permissions=3148800` includes:
+- Connect (voice)
+- Speak (voice)  
+- Use Voice Activity
+- Send Messages
+- Read Message History
+
+**Note:** If your bot was originally invited with only the `bot` scope, slash commands won't appear. You'll need to kick the bot and reinvite with both scopes, or grant administrator permissions as a workaround.
+
 ## Installation
 
 ```bash
@@ -93,10 +114,12 @@ openclaw gateway call discord-voice.status
 
 ### Via slash command
 ```
-/voice join <channel-id>
-/voice leave <channel-id>
-/voice status
+/vc join <channel-name-or-id>
+/vc leave [channel-name-or-id]
+/vc status
 ```
+
+**Note:** Requires `applications.commands` OAuth2 scope — see [Discord Bot Setup](#discord-bot-setup).
 
 ## How It Works
 

@@ -86,17 +86,39 @@ Then add to `~/.openclaw/openclaw.json`:
         "config": {
           "stt": {
             "provider": "openai",
-            "openaiApiKey": "sk-..."
+            "openaiApiKey": "sk-...",
+            "model": "whisper-1"
+          },
+          "tts": {
+            "edgeTtsPath": "/path/to/edge-tts",
+            "voice": "en-GB-SoniaNeural"
           },
           "vad": {
             "silenceThresholdMs": 1500
-          }
+          },
+          "model": "sonnet",
+          "thinking": "off"
         }
       }
     }
   }
 }
 ```
+
+### Config Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `stt.provider` | `"openai"` | STT provider: `"openai"`, `"local"`, or `"deepgram"` |
+| `stt.openaiApiKey` | `$OPENAI_API_KEY` | OpenAI API key for Whisper |
+| `stt.model` | `"whisper-1"` | Whisper model name |
+| `tts.edgeTtsPath` | `"edge-tts"` | Path to edge-tts CLI |
+| `tts.voice` | `"en-GB-SoniaNeural"` | Edge TTS voice (see `edge-tts --list-voices`) |
+| `vad.silenceThresholdMs` | `1500` | Silence duration (ms) before processing speech |
+| `model` | (default model) | AI model for responses. Aliases: `"opus"`, `"sonnet"`, `"haiku"` |
+| `thinking` | `"off"` | Thinking level for responses (off recommended for speed) |
+| `botToken` | (from discord channel) | Discord bot token (optional, falls back to main config) |
+| `autoJoin.channelIds` | `[]` | Voice channel IDs to auto-join on startup |
 
 ## Usage
 
@@ -146,5 +168,10 @@ Voice responses include a system prompt that encourages brief, conversational re
 ## TODO
 
 - [x] Strip emoji from voice responses (TTS reads them as garbage)
+- [x] Strip markdown formatting from responses
+- [x] Configurable model and thinking level
+- [x] Configurable TTS path and voice
+- [x] Stream TTS audio (reduce time-to-first-audio)
 - [ ] Optimize VAD to avoid cutting off speech
 - [ ] Add local Whisper support (whisper.cpp)
+- [ ] Interruption handling (stop playback when user speaks)

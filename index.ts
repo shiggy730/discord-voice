@@ -429,9 +429,13 @@ async function handleVoiceConnection(
           const textPath = join(tmpdir(), `tts-text-${Date.now()}.txt`);
           writeFileSync(textPath, textWithoutEmoji);
           
+          // Get TTS config (path and voice) from plugin config
+          const edgeTtsPath = config?.tts?.edgeTtsPath || 'edge-tts';
+          const ttsVoice = config?.tts?.voice || 'en-GB-SoniaNeural';
+          
           // Spawn edge-tts and stream stdout directly to Discord
-          const ttsProcess = spawn('/home/shiggy730/anaconda3/envs/natsu/bin/edge-tts', [
-            '--voice', 'en-GB-SoniaNeural',
+          const ttsProcess = spawn(edgeTtsPath, [
+            '--voice', ttsVoice,
             '--file', textPath
           ]);
           

@@ -330,8 +330,33 @@ class VoiceActivityDetector {
       this.pcmChunks = [];
       this.speaking = false;
       this.silenceStart = null;
+      
+      // Check minimum audio energy to filter out silence/noise
+      // that causes Whisper hallucinations
+      const rms = this.calculateRMS(fullAudio);
+      const minEnergy = 500; // Threshold for 16-bit PCM (tune as needed)
+      if (rms < minEnergy) {
+        // Too quiet - likely silence or ambient noise, skip STT
+        return;
+      }
+      
       this.onSpeechEnd(fullAudio);
     }
+  }
+  
+  // Calculate RMS (root mean square) energy of 16-bit PCM audio
+  private calculateRMS(buffer: Buffer): number {
+    if (buffer.length < 2) return 0;
+    
+    let sumSquares = 0;
+    const sampleCount = buffer.length / 2; // 16-bit = 2 bytes per sample
+    
+    for (let i = 0; i < buffer.length; i += 2) {
+      const sample = buffer.readInt16LE(i);
+      sumSquares += sample * sample;
+    }
+    
+    return Math.sqrt(sumSquares / sampleCount);
   }
 }
 

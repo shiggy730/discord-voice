@@ -334,9 +334,10 @@ class VoiceActivityDetector {
       // Check minimum audio energy to filter out silence/noise
       // that causes Whisper hallucinations
       const rms = this.calculateRMS(fullAudio);
-      const minEnergy = 500; // Threshold for 16-bit PCM (tune as needed)
+      const minEnergy = 2000; // Threshold for 16-bit PCM (raised from 500)
+      console.log(`[Voice] Audio RMS: ${rms.toFixed(0)}, threshold: ${minEnergy}, duration: ${fullAudio.length / 2 / 48000}s`);
       if (rms < minEnergy) {
-        // Too quiet - likely silence or ambient noise, skip STT
+        console.log(`[Voice] Skipping - audio too quiet (RMS ${rms.toFixed(0)} < ${minEnergy})`);
         return;
       }
       

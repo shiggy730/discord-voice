@@ -7,7 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "strict": false,
     "skipLibCheck": true,
-    "noEmit": true,
+    "noEmit": false,
     "resolveJsonModule": true,
     "declaration": false,
     "outDir": "./dist"

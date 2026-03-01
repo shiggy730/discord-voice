@@ -413,6 +413,29 @@ async function handleVoiceConnection(
         api.logger.info(`[Voice] STT took ${sttTime}ms - User said: "${text}"`);
 
         try {
+          // Play quick acknowledgment before LLM processing
+          // Only for longer queries (>3 words) that likely need tools
+          const wordCount = text.trim().split(/\s+/).length;
+          if (wordCount > 3) {
+            const ackPhrases = ["One sec...", "Let me check...", "Hmm, let me see...", "Looking into it..."];
+            const ackText = ackPhrases[Math.floor(Math.random() * ackPhrases.length)];
+            const edgeTtsPath = config?.tts?.edgeTtsPath || 'edge-tts';
+            const ttsVoice = config?.tts?.voice || 'en-GB-SoniaNeural';
+            
+            // Quick TTS for acknowledgment (fire and forget - don't await completion)
+            const ackAudioPath = join(tmpdir(), `ack-${Date.now()}.mp3`);
+            try {
+              execSync(`${edgeTtsPath} --voice ${ttsVoice} --text "${ackText}" --write-media ${ackAudioPath}`, { timeout: 3000 });
+              const ackResource = createAudioResource(ackAudioPath, { inputType: StreamType.Arbitrary });
+              player.play(ackResource);
+              // Brief pause to let ack play
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              try { unlinkSync(ackAudioPath); } catch {}
+            } catch (e) {
+              api.logger.warn(`[Voice] Ack TTS failed: ${e}`);
+            }
+          }
+          
           // 2. Generate response through main OpenClaw session
           const llmStart = Date.now();
           const replyText = await generateSessionResponse(text, userId);

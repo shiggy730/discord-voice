@@ -303,9 +303,9 @@ class VoiceActivityDetector {
   private silenceStart: number | null = null;
   private speaking: boolean = false;
   private silenceThreshold: number;
-  private onSpeechEnd: (audio: Buffer) => void;
+  private onSpeechEnd: (audio: Buffer, rms: number) => void;
 
-  constructor(silenceThresholdMs: number, onSpeechEnd: (audio: Buffer) => void) {
+  constructor(silenceThresholdMs: number, onSpeechEnd: (audio: Buffer, rms: number) => void) {
     this.silenceThreshold = silenceThresholdMs;
     this.onSpeechEnd = onSpeechEnd;
   }
@@ -341,7 +341,7 @@ class VoiceActivityDetector {
         return;
       }
       
-      this.onSpeechEnd(fullAudio);
+      this.onSpeechEnd(fullAudio, rms);
     }
   }
   
@@ -399,7 +399,7 @@ async function handleVoiceConnection(
     const config = api.config.plugins?.entries?.["discord-voice"]?.config;
     const silenceMs = config?.vad?.silenceThresholdMs || 1500;
 
-    const vad = new VoiceActivityDetector(silenceMs, async (audioBuffer) => {
+    const vad = new VoiceActivityDetector(silenceMs, async (audioBuffer, audioRms) => {
       try {
         const pipelineStart = Date.now();
         
@@ -485,7 +485,7 @@ async function handleVoiceConnection(
           ttsProcess.on('close', () => {
             const ttsTime = Date.now() - ttsStart;
             const totalTime = Date.now() - pipelineStart;
-            const timingLog = `[${new Date().toISOString()}] TOTAL: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms, firstByte: ${firstByteTime}ms) - "${text.slice(0,30)}..." -> "${textWithoutEmoji.slice(0,30)}..."\n`;
+            const timingLog = `[${new Date().toISOString()}] TOTAL: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms, firstByte: ${firstByteTime}ms, RMS: ${audioRms.toFixed(0)}) - "${text.slice(0,30)}..." -> "${textWithoutEmoji.slice(0,30)}..."\n`;
             api.logger.info(`[Voice] TOTAL pipeline: ${totalTime}ms (STT: ${sttTime}ms, LLM: ${llmTime}ms, TTS: ${ttsTime}ms, firstByte: ${firstByteTime}ms)`);
             appendFileSync('/tmp/voice-timing.log', timingLog);
             try { unlinkSync(textPath); } catch {}

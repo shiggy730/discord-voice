@@ -379,21 +379,17 @@ async function handleVoiceConnection(
 
   activeConnections.set(channel.id, connection);
 
-  // Wait for connection to be ready
-  await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-  api.logger.info(`Joined voice channel: ${channel.name}`);
+  // Set up audio receiver and player BEFORE waiting for Ready
+  // This prevents race condition where user speaks before listener is attached
+  const receiver = connection.receiver;
+  const player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Play,  // Keep playing even if connection hiccups
+      maxMissedFrames: 50,  // Allow more missed frames before stopping (default is 5)
+    },
+  });
 
-  try {
-    const receiver = connection.receiver;
-    const player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play,  // Keep playing even if connection hiccups
-        maxMissedFrames: 50,  // Allow more missed frames before stopping (default is 5)
-      },
-    });
-    connection.subscribe(player);
-
-  // Listen to each user's audio
+  // Listen to each user's audio - attach BEFORE connection is fully ready
   receiver.speaking.on("start", (userId) => {
     api.logger.info(`User ${userId} started speaking`);
     const config = api.config.plugins?.entries?.["discord-voice"]?.config;
@@ -543,8 +539,14 @@ async function handleVoiceConnection(
     });
   });
 
+  // Now wait for connection to be ready and subscribe player
+  // Speaking listener is already attached, so we won't miss early audio
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    connection.subscribe(player);
+    api.logger.info(`Joined voice channel: ${channel.name} (ready to receive audio)`);
   } catch (err) {
-    api.logger.error(`Voice setup error: ${err}`);
+    api.logger.error(`Voice connection error: ${err}`);
   }
 
   return connection;
